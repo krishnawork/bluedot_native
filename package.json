@@ -10,8 +10,14 @@
     "test": "jest"
   },
   "dependencies": {
+    "@preact/signals-react": "^3.0.1",
+    "expo-modules-core": "^2.2.2",
     "react": "19.0.0",
-    "react-native": "0.78.0"
+    "react-native": "0.78.0",
+    "react-native-permissions": "^5.2.5",
+    "react-native-sensors": "^7.3.6",
+    "react-native-svg": "^15.11.2",
+    "react-native-wifi-reborn": "^4.13.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
