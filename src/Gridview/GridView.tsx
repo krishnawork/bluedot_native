@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, ScrollView, useWindowDimensions } from "react-native";
 import Svg, { Rect } from "react-native-svg";
-import { selectedCell } from "../store/gridSignal";
+import { selectedRectCell } from "../store/gridSignal";
 import { DataGridProps } from "../types/gridViewTypes";
 
 const GRID_SIZE = 50; // Ek cell ka size (px)
@@ -14,7 +14,7 @@ const DataGrid = ({highlightCell}:DataGridProps) => {
 
 
   const handleCellPress = (col: number, row: number) => {
-     selectedCell.value = `${col},${row}`;
+    selectedRectCell.value = `${col},${row}`;
   };
 
 

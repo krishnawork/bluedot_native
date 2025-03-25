@@ -1,59 +1,47 @@
+
 import React, { useState, useEffect } from 'react';
 import { View, Text, Button, PermissionsAndroid, Platform, ScrollView, Alert } from 'react-native';
 import WifiManager from 'react-native-wifi-reborn';
 import { accelerometer, gyroscope, magnetometer, setUpdateIntervalForType, SensorTypes } from "react-native-sensors";
-
-// ✅ Define Sensor Data Types
-interface RotationEntry {
-  timestamp: string;
-  rotationData: { angle: number; x: number; y: number; z: number }[];
-  magneticData: { x: number; y: number; z: number }[];
-  movementData: { accX: number; accY: number; accZ: number }[];
-  wifi: { ssid: string; rssi: number }[];
-}
+import { SensorStyles as Style } from './sensorDataStyle';
+import { MagneticData, ModeType, MovementData, SensorEntry, WiFiData } from '../types/sensorDataCollectorType';
+import GridView from '../Gridview/GridView';
+import { renderGrid } from '../store/gridSignal';
+import socketService from '../socket/SocketSetup';
 
 const SensorDataCollector: React.FC = () => {
-  const [rotationData, setRotationData] = useState<{ angle: number; x: number; y: number; z: number }[]>([]);
-  const [magneticData, setMagneticData] = useState<{ x: number; y: number; z: number }[]>([]);
-  const [movementData, setMovementData] = useState<{ accX: number; accY: number; accZ: number }[]>([]);
-  const [isRotating, setIsRotating] = useState(false);
-  const [collectedData, setCollectedData] = useState<RotationEntry[]>([]);
-  const [permissionsGranted, setPermissionsGranted] = useState(false);
+    const [sensorData, setSensorData] = useState<SensorEntry[]>([]);
+  const [mode, setMode] = useState<ModeType>('static');
 
-  let currentAngle = 0;
-  let lastAngle = 0;
+  useEffect(() => {
+    // Ek baar initialize kar diya socket
+    console.log('Socket initialized:', socketService.socket.id);
+  }, []);
 
-  // ✅ Request Necessary Permissions Before Fetching Data
-  const requestPermissions = async (): Promise<boolean> => {
-    try {
-      if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.BODY_SENSORS
-        ]);
+  // ✅ Request Location Permissions for WiFi
+  const requestPermissions = async () => {
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+      );
 
-        if (
-          granted[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] !== PermissionsAndroid.RESULTS.GRANTED ||
-          granted[PermissionsAndroid.PERMISSIONS.BODY_SENSORS] !== PermissionsAndroid.RESULTS.GRANTED
-        ) {
-          Alert.alert("Permission Denied", "Location & Sensor permissions are required for data collection.");
-          return false;
-        }
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        Alert.alert("Permission Required", "Please enable location permissions for WiFi scanning.");
+        return false;
       }
-      setPermissionsGranted(true);
-      return true;
-    } catch (error) {
-      console.error("Permission Error:", error);
-      return false;
     }
+    return true;
   };
 
   // ✅ Function to Scan Nearby WiFi Networks
-  const scanWiFiNetworks = async (): Promise<{ ssid: string; rssi: number }[]> => {
+  const scanWiFiNetworks = async (): Promise<WiFiData[]> => {
     try {
-      if (!permissionsGranted) return [];
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) return [];
+
       const wifiList = await WifiManager.loadWifiList();
       console.log('wifiList: ', wifiList);
+
       return wifiList.map((network) => ({
         ssid: network.SSID,
         rssi: network.level,
@@ -64,109 +52,115 @@ const SensorDataCollector: React.FC = () => {
     }
   };
 
-  // ✅ Function to Start Rotation Capture (with Magnetometer & Accelerometer)
-  const startRotationCapture = async () => {
-    if (!permissionsGranted) {
-      Alert.alert("Permission Required", "Please allow location & sensor permissions to continue.");
-      return;
+  // ✅ Function to Collect All Data
+  const collectAllData = async (currentMode: ModeType): Promise<void> => {
+    try {
+      const hasPermission = await requestPermissions();
+      if (!hasPermission) return;
+
+      // ✅ 1. Collect WiFi Scan Data (All Networks)
+      const wifiData: WiFiData[] = await scanWiFiNetworks();
+
+      // ✅ 2. Collect Magnetic Field Data
+      const magnetometerData: MagneticData = await new Promise((resolve) => {
+        const subscription = magnetometer.subscribe(({ x, y, z }) => {
+          resolve({ x, y, z });
+          subscription.unsubscribe();
+        });
+      });
+
+      // ✅ 3. Collect Accelerometer Data
+      const accelerometerData: MovementData = await new Promise((resolve) => {
+        const subscription = accelerometer.subscribe(({ x, y, z }) => {
+          resolve({ accX: x, accY: y, accZ: z, gyroX: 0, gyroY: 0, gyroZ: 0 });
+          subscription.unsubscribe();
+        });
+      });
+
+      // ✅ 4. Collect Gyroscope Data
+      const gyroscopeData: { gyroX: number; gyroY: number; gyroZ: number } = await new Promise((resolve) => {
+        const subscription = gyroscope.subscribe(({ x, y, z }) => {
+          resolve({ gyroX: x, gyroY: y, gyroZ: z });
+          subscription.unsubscribe();
+        });
+      });
+
+      // ✅ 5. Store Data in JSON Format
+      const newEntry: SensorEntry = {
+        timestamp: new Date().toISOString(),
+        wifi: wifiData,
+        magnetic: magnetometerData,
+        movement: { ...accelerometerData, ...gyroscopeData },
+        mode: currentMode,
+      };
+
+      // ✅ 6. Store & Display Data
+      setSensorData((prevData) => [...prevData, newEntry]);
+      console.log('Collected Data:', newEntry);
+    } catch (error) {
+      console.error('Error collecting sensor data:', error);
     }
-
-    setRotationData([]);
-    setMagneticData([]);
-    setMovementData([]);
-    setIsRotating(true);
-    lastAngle = 0;
-    console.log("Rotation Started...");
-
-    // ✅ Subscribe to Gyroscope
-    const gyroSubscription = gyroscope.subscribe(({ x, y, z }) => {
-      currentAngle += Math.abs(x) + Math.abs(y) + Math.abs(z);
-      setRotationData((prev) => [...prev, { angle: currentAngle, x, y, z }]);
-
-      // ✅ 360-degree complete hone par stop karein
-      if (currentAngle - lastAngle >= 360) {
-        stopRotationCapture(gyroSubscription, magSubscription, accSubscription);
-      }
-    });
-
-    // ✅ Subscribe to Magnetometer
-    const magSubscription = magnetometer.subscribe(({ x, y, z }) => {
-      setMagneticData((prev) => [...prev, { x, y, z }]);
-    });
-
-    // ✅ Subscribe to Accelerometer
-    const accSubscription = accelerometer.subscribe(({ x, y, z }) => {
-      setMovementData((prev) => [...prev, { accX: x, accY: y, accZ: z }]);
-    });
   };
 
-  // ✅ Function to Stop Rotation Capture & Save Data
-  const stopRotationCapture = async (
-    gyroSubscription: any,
-    magSubscription: any,
-    accSubscription: any
-  ) => {
-    setIsRotating(false);
-    console.log("Rotation Complete! Storing Data...");
-
-    // ✅ Stop all subscriptions
-    gyroSubscription.unsubscribe();
-    magSubscription.unsubscribe();
-    accSubscription.unsubscribe();
-
-    // ✅ Scan WiFi Data
-    const wifiData = await scanWiFiNetworks();
-
-    // ✅ Create Final Object with All Data
-    const newEntry: RotationEntry = {
-      timestamp: new Date().toISOString(),
-      rotationData,
-      magneticData,
-      movementData,
-      wifi: wifiData,
-    };
-
-    setCollectedData((prevData) => [...prevData, newEntry]);
-    setRotationData([]);
-    setMagneticData([]);
-    setMovementData([]);
-    currentAngle = 0;
-    lastAngle = 0;
-
-    console.log("Stored Rotation Data:", newEntry);
-  };
-
-  // ✅ Check Permissions When App Starts
+  // ✅ Auto Mode Data Collection Every 3 Sec
   useEffect(() => {
-    requestPermissions();
-  }, []);
+    // ✅ Set Sensor Update Intervals
+    setUpdateIntervalForType(SensorTypes.magnetometer, 1000); // Every 1 sec
+    setUpdateIntervalForType(SensorTypes.accelerometer, 1000);
+    setUpdateIntervalForType(SensorTypes.gyroscope, 1000);
 
-  return (
-    <ScrollView>
-      <View style={{ padding: 20 }}>
-        <Text>Rotation Mode: {isRotating ? "ACTIVE" : "INACTIVE"}</Text>
-        <Text>{permissionsGranted ? "✅ Permissions Granted" : "❌ Permissions Not Granted"}</Text>
+    const interval = setInterval(() => {
+      if (mode !== 'static') {
+        collectAllData(mode);
+      }
+    }, 3000); // Har 3 sec me data collect karega
 
-        {/* ✅ Button to Start/Stop Rotation Mode */}
-        {!isRotating ? (
-          <Button title="Start 360° Capture" onPress={startRotationCapture} />
-        ) : (
-          <Button title="Stop Capture" onPress={() => stopRotationCapture(null, null, null)} />
-        )}
+    return () => clearInterval(interval);
+  }, [mode]);
+    return (
+      <>
+        <View style={Style.container}>
+            <ScrollView>
+                <Text>Current Mode: {mode.toUpperCase()}</Text>
 
-        {/* ✅ Display Collected Rotation Data */}
-        {collectedData.map((data, index) => (
-          <Text key={index} style={{ marginTop: 10 }}>
-            📌 Time: {data.timestamp} {"\n"}
-            🔄 Rotation Points: {data.rotationData.length} {"\n"}
-            🧲 Magnetic Data Points: {data.magneticData.length} {"\n"}
-            🏃 Accelerometer Data Points: {data.movementData.length} {"\n"}
-            📡 WiFi Networks: {JSON.stringify(data.wifi)} {"\n"}
-          </Text>
+                {/* ✅ Mode Selection Buttons */}
+                <Button title="Static Mode" onPress={() => setMode('static')} />
+                <Button title="Walking Mode (Auto)" onPress={() => setMode('walking')} />
+                <Button title="Rotation Mode (Auto)" onPress={() => setMode('rotation')} />
+
+                {/* ✅ Button to Collect Data Manually */}
+                <Button title="Collect Data Now" onPress={() => collectAllData(mode)} />
+
+                {/* ✅ Display Collected Data */}
+                {/* {sensorData.map((data, index) => (
+                    <Text key={index} style={{ marginTop: 10 }}>
+                        📌 Time: {data.timestamp} {'\n'}
+                        📡 WiFi: {data.wifi.ssid} (RSSI: {data.wifi.rssi}) {'\n'}
+                        🧲 Magnetic: X: {data.magnetic.x}, Y: {data.magnetic.y}, Z: {data.magnetic.z} {'\n'}
+                        🏃 Accelerometer: X: {data.movement.accX}, Y: {data.movement.accY}, Z: {data.movement.accZ} {'\n'}
+                        🔄 Gyroscope: X: {data.movement.gyroX}, Y: {data.movement.gyroY}, Z: {data.movement.gyroZ} {'\n'}
+                        🚀 Mode: {data.mode.toUpperCase()}
+                    </Text>
+                ))} */}
+                 {sensorData.map((data, index) => (
+                     <Text key={index} style={{ marginTop: 10 }}>
+                         📌 Time: {data.timestamp} {'\n'}
+                         📡 WiFi Networks: {JSON.stringify(data.wifi)} {'\n'}
+                         🧲 Magnetic: X: {data.magnetic.x}, Y: {data.magnetic.y}, Z: {data.magnetic.z} {'\n'}
+                         🏃 Accelerometer: X: {data.movement.accX}, Y: {data.movement.accY}, Z: {data.movement.accZ} {'\n'}
+                         🔄 Gyroscope: X: {data.movement.gyroX}, Y: {data.movement.gyroY}, Z: {data.movement.gyroZ} {'\n'}
+                         🚀 Mode: {data.mode.toUpperCase()}
+                     </Text>
         ))}
-      </View>
-    </ScrollView>
-  );
+
+            </ScrollView>
+
+        </View>
+
+       {renderGrid}
+
+        </>
+    );
 };
 
 export default SensorDataCollector;

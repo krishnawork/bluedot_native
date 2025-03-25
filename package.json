@@ -11,13 +11,21 @@
   },
   "dependencies": {
     "@preact/signals-react": "^3.0.1",
+    "@shopify/react-native-skia": "^1.11.18",
     "expo-modules-core": "^2.2.2",
+    "lpf": "^1.0.0",
     "react": "19.0.0",
     "react-native": "0.78.0",
+    "react-native-compass-heading": "^2.0.1",
+    "react-native-easy-grid": "^0.2.2",
+    "react-native-gesture-handler": "^2.24.0",
+    "react-native-image-picker": "^8.2.0",
     "react-native-permissions": "^5.2.5",
+    "react-native-reanimated": "^3.17.1",
     "react-native-sensors": "^7.3.6",
     "react-native-svg": "^15.11.2",
-    "react-native-wifi-reborn": "^4.13.4"
+    "react-native-wifi-reborn": "^4.13.4",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
